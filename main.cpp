@@ -176,24 +176,6 @@ int is_my_mac(const uint8_t* mac1, const uint8_t* mac2) {
 	return memcmp(mac1, mac2, 6) == 0;
 }
 
-int find_sender_index(arp_pair* pairs, int count, const char* ip) {
-	for (int i = 0; i < count; i++) {
-		if (strcmp(pairs[i].sender_ip, ip) == 0) {
-			return i;
-		}
-	}
-	return -1;
-}
-
-int find_target_index(arp_pair* pairs, int count, const char* ip) {
-	for (int i = 0; i < count; i++) {
-		if (strcmp(pairs[i].target_ip, ip) == 0) {
-			return i;
-		}
-	}
-	return -1;
-}
-
 int relay_ip_packet(pcap_t* pcap, const u_char* packet, struct pcap_pkthdr* header, const uint8_t* my_mac, const uint8_t* dst_mac) {
 	u_char* new_packet = (u_char*)malloc(header->len);
 	if (new_packet == NULL) {
@@ -370,9 +352,23 @@ int main(int argc, char* argv[]) {
 			inet_ntop(AF_INET, &src_addr, src_ip, sizeof(src_ip));
 			inet_ntop(AF_INET, &dst_addr, dst_ip, sizeof(dst_ip));
 
-			int sender_idx = find_sender_index(pairs, cnt, src_ip);
-			int target_idx = find_target_index(pairs, cnt, dst_ip);
-			if (sender_idx == target_idx && sender_idx >= 0) {
+			/*
+			   int sender_idx = find_sender_index(pairs, cnt, src_ip);
+			   int target_idx = find_target_index(pairs, cnt, dst_ip);
+			   */
+
+			int sender_idx = -1; 
+			int target_idx = -1;
+
+			for (int i = 0; i < cnt; i++) {
+				if ((strcmp(pairs[i].sender_ip, src_ip) == 0) && (strcmp(pairs[i].target_ip, dst_ip) == 0)) {
+					sender_idx = i;
+					target_idx = i;
+					break;
+				}
+			}
+
+			if (sender_idx >= 0) {
 				printf("Relaying IP packet from sender %s to target %s", src_ip, dst_ip);
 
 				if (ip_hdr->ip_p == IPPROTO_ICMP) {
