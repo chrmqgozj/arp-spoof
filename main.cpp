@@ -352,11 +352,6 @@ int main(int argc, char* argv[]) {
 			inet_ntop(AF_INET, &src_addr, src_ip, sizeof(src_ip));
 			inet_ntop(AF_INET, &dst_addr, dst_ip, sizeof(dst_ip));
 
-			/*
-			   int sender_idx = find_sender_index(pairs, cnt, src_ip);
-			   int target_idx = find_target_index(pairs, cnt, dst_ip);
-			   */
-
 			int sender_idx = -1; 
 			int target_idx = -1;
 
